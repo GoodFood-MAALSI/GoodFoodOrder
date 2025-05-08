@@ -1,0 +1,9 @@
+node_modules
+dist
+npm-debug.log
+.git
+.github
+.gitignore
+.env
+sonar-project.properties
+docker-compose.yaml
