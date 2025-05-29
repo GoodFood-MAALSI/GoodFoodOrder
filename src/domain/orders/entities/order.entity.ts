@@ -8,7 +8,7 @@ export class Order {
   @Column()
   user_id: number;
 
-  @Column()
+  @Column({ nullable: true })
   deliverer_id: number;
 
   @Column()

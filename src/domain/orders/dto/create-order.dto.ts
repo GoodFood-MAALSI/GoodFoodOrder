@@ -6,17 +6,13 @@ export class CreateOrderDto {
   @IsNumber()
   user_id: number;
 
-  @ApiProperty({ description: 'ID du livreur' })
-  @IsNumber()
-  deliverer_id: number;
-
   @ApiProperty({ description: 'ID du restaurant' })
   @IsNumber()
   restaurant_id: number;
 
   @ApiProperty({ description: 'ID du statut de la commande' })
   @IsNumber()
-  statut_id: number;
+  statut_id: number = 1;
 
   @ApiProperty({ description: 'Description de la commande', required: false })
   @IsOptional()
