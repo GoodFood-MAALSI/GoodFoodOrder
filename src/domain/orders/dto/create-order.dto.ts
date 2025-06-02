@@ -31,7 +31,8 @@ export class CreateOrderDto {
   @IsNumber()
   service_charge: number;
 
-  @ApiProperty({ description: 'Remise globale', example: 5.00 })
+  @ApiProperty({ description: 'Remise globale', example: 5.00, required: false, nullable: true })
+  @IsOptional()
   @IsNumber()
-  global_discount: number;
+  global_discount?: number | null;
 }

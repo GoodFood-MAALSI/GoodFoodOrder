@@ -8,8 +8,8 @@ export class Order {
   @Column()
   user_id: number;
 
-  @Column({ nullable: true })
-  deliverer_id: number;
+  @Column({ type: 'int', nullable: true })
+  deliverer_id?: number | null;
 
   @Column()
   restaurant_id: number;
@@ -17,8 +17,8 @@ export class Order {
   @Column()
   statut_id: number;
 
-  @Column({ nullable: true })
-  description: string;
+  @Column({ type: 'text', nullable: true })
+  description?: string | null;
 
   @Column('numeric', { precision: 10, scale: 2 })
   subtotal: number;
@@ -29,8 +29,8 @@ export class Order {
   @Column('numeric', { precision: 10, scale: 2 })
   service_charge: number;
 
-  @Column('numeric', { precision: 10, scale: 2, default: 0 })
-  global_discount: number;
+  @Column('numeric', { precision: 10, scale: 2, nullable: true, default: 0 })
+  global_discount?: number | null;
 
   @CreateDateColumn()
   created_at: Date;
