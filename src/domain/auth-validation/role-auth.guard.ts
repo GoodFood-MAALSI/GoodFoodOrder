@@ -1,17 +1,20 @@
-import {
-  CanActivate,
-  ExecutionContext,
-  HttpException,
-  HttpStatus,
-  Injectable,
-  Type,
-  mixin,
-} from '@nestjs/common';
+import { Injectable, CanActivate, ExecutionContext, HttpException, HttpStatus, Inject, Type } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
+import { HttpService } from '@nestjs/axios';
+import { firstValueFrom } from 'rxjs';
 
-// Base class pour la garde avec logique partagée
-class RoleAuthGuardBase implements CanActivate {
-  constructor(private readonly role: 'client' | 'restaurateur' | 'livreur' | 'admin') {}
+@Injectable()
+export class RolesAuthGuard implements CanActivate {
+  private allowedRoles: Array<'client' | 'restaurateur' | 'livreur' | 'admin'>;
+
+  constructor(
+    @Inject(HttpService) private readonly httpService: HttpService,
+  ) {}
+
+  // Méthode à appeler après l'instanciation
+  setRoles(roles: Array<'client' | 'restaurateur' | 'livreur' | 'admin'>) {
+    this.allowedRoles = roles;
+  }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
@@ -22,47 +25,74 @@ class RoleAuthGuardBase implements CanActivate {
     }
 
     try {
+      let decoded: { id: string; role: string } | null = null;
+      let userRole: string | null = null;
+
       const secrets: Record<string, string | undefined> = {
+        restaurateur: process.env.RESTAURATEUR_SECRET,
         client: process.env.CLIENT_SECRET,
         admin: process.env.ADMIN_SECRET,
-        restaurateur: process.env.RESTAURATEUR_SECRET,
         livreur: process.env.LIVREUR_SECRET,
       };
 
-      const secret = secrets[this.role];
-      if (!secret) {
-        throw new HttpException(`Secret manquant pour le rôle: ${this.role}`, HttpStatus.INTERNAL_SERVER_ERROR);
+      const roleToServiceMap: Record<string, string> = {
+        restaurateur: 'restaurateur-service.restaurateur.svc.cluster.local:3002/users',
+        client: 'client-service.client.svc.cluster.local:3001/users',
+        admin: 'admin-service.admin.svc.cluster.local:3004/users',
+        livreur: 'livreur-service.livreur.svc.cluster.local:3003/users',
+      };
+
+      for (const role of this.allowedRoles) {
+        try {
+          const secret = secrets[role];
+          if (!secret) {
+            continue; // Pas de secret => ignorer ce rôle
+          }
+
+          const verified = jwt.verify(token, secret);
+          if (!verified || typeof verified !== 'object') {
+            continue; // Si decoded est null ou pas un objet, on skip
+          }
+
+          decoded = verified as { id: string; role: string };
+
+          if (decoded.role === role) {
+            userRole = decoded.role;
+
+            const response = await firstValueFrom(
+              this.httpService.get(`http://${roleToServiceMap[role]}/verify/${decoded.id}`, {
+                headers: { Authorization: `Bearer ${token}` },
+              }),
+            );
+
+            if (response.status === 200) {
+              request.auth = { id: decoded.id, role: userRole };
+              return true;
+            }
+          }
+        } catch {
+          continue;
+        }
       }
 
-      const decoded = jwt.verify(token, secret) as { id: string; role: string };
-
-      if (!decoded || !decoded.role) {
-        throw new HttpException('Token invalide', HttpStatus.UNAUTHORIZED);
-      }
-
-      if (decoded.role !== this.role) {
-        throw new HttpException(`Rôle requis: ${this.role}`, HttpStatus.FORBIDDEN);
-      }
-
-      request.auth = { id: decoded.id, role: decoded.role };
-      return true;
+      throw new HttpException('Rôle non autorisé, token invalide ou utilisateur inexistant', HttpStatus.FORBIDDEN);
     } catch (err) {
-      throw new HttpException(
-        err instanceof HttpException ? err.getResponse().toString() : 'Erreur d\'authentification',
-        err instanceof HttpException ? err.getStatus() : HttpStatus.UNAUTHORIZED,
-      );
+      throw err instanceof HttpException
+        ? err
+        : new HttpException('Erreur d\'authentification', HttpStatus.UNAUTHORIZED);
     }
   }
 }
 
-// Factory: retourne une garde dynamique avec le rôle injecté
-export function RoleAuthGuard(role: 'client' | 'restaurateur' | 'livreur' | 'admin'): Type<CanActivate> {
+export const RoleAuthGuardFactory = (
+  roles: Array<'client' | 'restaurateur' | 'livreur' | 'admin'>,
+): Type<CanActivate> => {
   @Injectable()
-  class RoleAuthMixin extends RoleAuthGuardBase {
-    constructor() {
-      super(role);
+  class ConfiguredGuard extends RolesAuthGuard {
+    constructor(httpService: HttpService) {
+      super(httpService);
+      this.setRoles(roles);
     }
   }
-
-  return mixin(RoleAuthMixin);
-}
+  return ConfiguredGuard;
+};

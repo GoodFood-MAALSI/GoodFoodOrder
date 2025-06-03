@@ -4,11 +4,12 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { OrderController } from './orders.controller';
 import { OrderService } from './orders.service';
 import { Order } from './entities/order.entity';
-import { AuthValidationService } from '../auth-validation/auth-validation.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Order]), HttpModule],
   controllers: [OrderController],
-  providers: [OrderService, AuthValidationService],
+  providers: [OrderService, 
+    // AuthValidationService
+  ],
 })
 export class OrderModule {}
