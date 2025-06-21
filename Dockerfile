@@ -7,9 +7,11 @@ COPY . .
 
 # Étape de dev (pour le développement avec hot-reloading)
 FROM base AS dev
-CMD ["npm", "run", "start:dev"]
+ENV NODE_OPTIONS="--max-old-space-size=2048"
+CMD ["npm", "run", "start:dev:with-seed"]
 
 # Étape de prod (pour la production)
 FROM base AS prod
 RUN npm run build
+ENV NODE_OPTIONS="--max-old-space-size=2048"
 CMD ["npm", "run", "start"]

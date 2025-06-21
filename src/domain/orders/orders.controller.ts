@@ -1,70 +1,303 @@
 import {
   Controller,
   Post,
+  Get,
+  Patch,
   Body,
-  UseGuards,
-  Request,
+  Param,
   HttpException,
   HttpStatus,
+  BadRequestException,
+  Query,
+  NotFoundException,
+  Req,
 } from '@nestjs/common';
-import { OrderService } from './orders.service';
+import { Request } from 'express';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
+import { FilterDelivererOrdersDto } from './dto/filter-deliverer-orders.dto';
+import { FilterRestaurantOrdersDto } from './dto/filter-restaurant-orders.dto';
 import {
-  ApiTags,
+  ApiBody,
   ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
+  ApiTags,
+  ApiParam,
+  ApiQuery,
 } from '@nestjs/swagger';
-import { RoleAuthGuardFactory } from '../auth-validation/role-auth.guard';
+import { OrderService } from './orders.service';
+import { Pagination } from '../utils/pagination';
 
+@Controller('orders')
 @ApiTags('Orders')
-@Controller('order')
 export class OrderController {
-  constructor(
-    private readonly orderService: OrderService,
-    // private readonly authValidationService: AuthValidationService,
-  ) {}
+  constructor(private readonly orderService: OrderService) {}
 
-  @Post()
-  @ApiBearerAuth()
-  @UseGuards(RoleAuthGuardFactory(['client']))
-  @ApiOperation({ summary: 'Créer une nouvelle commande pour un client' })
-  @ApiResponse({ status: 200, description: 'Commande créée avec succès' })
-  @ApiResponse({
-    status: 400,
-    description: 'Échec de la vérification ou données invalides',
+  @Get('delivery')
+  @ApiOperation({
+    summary: 'Récupérer les commandes en attente pour un livreur',
   })
-  @ApiResponse({ status: 401, description: 'Non autorisé' })
-  @ApiResponse({ status: 403, description: 'Vérification du client échouée' })
-  async createOrder(@Request() req, @Body() body: CreateOrderDto) {
-    const { id, role } = req.auth;
-
-    // Vérifier que user_id correspond à l'id du token
-    if (parseInt(id, 10) !== body.user_id) {
+  @ApiQuery({
+    name: 'lat',
+    description: 'Latitude du livreur',
+    required: false,
+    type: Number,
+  })
+  @ApiQuery({
+    name: 'long',
+    description: 'Longitude du livreur',
+    required: false,
+    type: Number,
+  })
+  @ApiQuery({
+    name: 'perimeter',
+    description: 'Périmètre en mètres pour filtrer les commandes',
+    required: false,
+    type: Number,
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Numéro de page',
+    example: 1,
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Nombre maximum d’items par page',
+    example: 10,
+  })
+  async findForDelivery(
+    @Query() filters: FilterDelivererOrdersDto,
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 10,
+    @Req() req: Request,
+  ) {
+    try {
+      const { orders, total } = await this.orderService.findForDelivery(
+        filters,
+        page,
+        limit,
+      );
+      const { links, meta } = Pagination.generatePaginationMetadata(
+        req,
+        page,
+        total,
+        limit,
+      );
+      return { orders, links, meta };
+    } catch (error) {
       throw new HttpException(
-        "Lutilisateur indiqué doit etre celui authentifié",
-        HttpStatus.FORBIDDEN,
+        {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Échec de la récupération des commandes pour livraison',
+          error: error.message,
+        },
+        HttpStatus.BAD_REQUEST,
       );
     }
+  }
+
+  @Post()
+  @ApiOperation({ summary: 'Créer une commande' })
+  @ApiBody({ type: CreateOrderDto })
+  async create(@Body() createOrderDto: CreateOrderDto) {
     try {
-      // Vérifier le client
-      // await this.authValidationService.verifyUser(
-      //   id,
-      //   'client',
-      //   req.headers['authorization']?.split(' ')[1],
-      // );
-      // await this.authValidationService.verifyRestaurant(
-      //   body.restaurant_id.toString(),
-      //   req.headers['authorization']?.split(' ')[1],
-      // );
-      const order = await this.orderService.create(body);
-      return {
-        order,
-      };
-    } catch (err) {
+      return await this.orderService.create(createOrderDto);
+    } catch (error) {
       throw new HttpException(
-        err.message || 'Échec de la création de la commande',
-        err.status || HttpStatus.BAD_REQUEST,
+        {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Échec de la création de la commande',
+          error: error.message,
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Récupérer une commande spécifique par ID' })
+  @ApiParam({ name: 'id', description: 'ID de la commande', type: Number })
+  async findOne(@Param('id') id: string) {
+    try {
+      const idNum = parseInt(id);
+      if (isNaN(idNum)) {
+        throw new BadRequestException('id doit être un nombre');
+      }
+      return await this.orderService.findOne(idNum);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw new HttpException(
+          {
+            statusCode: HttpStatus.NOT_FOUND,
+            message: 'Commande introuvable',
+            error: error.message,
+          },
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Échec de la récupération de la commande',
+          error: error.message,
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Get('client/:clientId')
+  @ApiOperation({ summary: 'Récupérer les commandes d’un client' })
+  @ApiParam({ name: 'clientId', description: 'ID du client', type: Number })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Numéro de page',
+    example: 1,
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Nombre maximum d’items par page',
+    example: 10,
+  })
+  async findByClient(
+    @Param('clientId') clientId: string,
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 10,
+    @Req() req: Request,
+  ) {
+    try {
+      const clientIdNum = parseInt(clientId);
+      if (isNaN(clientIdNum)) {
+        throw new BadRequestException('clientId doit être un nombre');
+      }
+      const { orders, total } = await this.orderService.findByClient(
+        clientIdNum,
+        page,
+        limit,
+      );
+      const { links, meta } = Pagination.generatePaginationMetadata(
+        req,
+        page,
+        total,
+        limit,
+      );
+      return { orders, links, meta };
+    } catch (error) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Échec de la récupération des commandes',
+          error: error.message,
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Get('restaurant/:restaurantId')
+  @ApiOperation({ summary: 'Récupérer les commandes d’un restaurant' })
+  @ApiParam({
+    name: 'restaurantId',
+    description: 'ID du restaurant',
+    type: Number,
+  })
+  @ApiQuery({
+    name: 'status_id',
+    description: 'ID du statut pour filtrer les commandes',
+    required: false,
+    type: Number,
+    example: 2,
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Numéro de page',
+    example: 1,
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Nombre maximum d’items par page',
+    example: 10,
+  })
+  async findByRestaurant(
+    @Param('restaurantId') restaurantId: string,
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 10,
+    @Query() filters: FilterRestaurantOrdersDto,
+    @Req() req: Request,
+  ) {
+    try {
+      const restaurantIdNum = parseInt(restaurantId);
+      if (isNaN(restaurantIdNum)) {
+        throw new BadRequestException('restaurantId doit être un nombre');
+      }
+      const { orders, total } = await this.orderService.findByRestaurant(
+        restaurantIdNum,
+        page,
+        limit,
+        filters,
+      );
+      const { links, meta } = Pagination.generatePaginationMetadata(
+        req,
+        page,
+        total,
+        limit,
+      );
+      return { orders, links, meta };
+    } catch (error) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Échec de la récupération des commandes',
+          error: error.message,
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Patch(':id/status')
+  @ApiOperation({ summary: 'Mettre à jour le statut d’une commande' })
+  @ApiParam({ name: 'id', description: 'ID de la commande', type: Number })
+  @ApiBody({ type: UpdateOrderStatusDto })
+  async updateStatus(
+    @Param('id') id: string,
+    @Body() updateOrderStatusDto: UpdateOrderStatusDto,
+  ) {
+    try {
+      const idNum = parseInt(id);
+      if (isNaN(idNum)) {
+        throw new BadRequestException('id doit être un nombre');
+      }
+      return await this.orderService.updateStatus(idNum, updateOrderStatusDto);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw new HttpException(
+          {
+            statusCode: HttpStatus.NOT_FOUND,
+            message: 'Commande ou statut introuvable',
+            error: error.message,
+          },
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Échec de la mise à jour du statut de la commande',
+          error: error.message,
+        },
+        HttpStatus.BAD_REQUEST,
       );
     }
   }

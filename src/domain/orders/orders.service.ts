@@ -1,23 +1,318 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Order } from './entities/order.entity';
+import { OrderItem } from '../order-items/entities/order-items.entity';
+import { OrderStatus } from '../order-status/entities/order-status.entity';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
+import * as geolib from 'geolib';
+import { FilterDelivererOrdersDto } from './dto/filter-deliverer-orders.dto';
+import { FilterRestaurantOrdersDto } from './dto/filter-restaurant-orders.dto';
 
 @Injectable()
 export class OrderService {
   constructor(
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
+    @InjectRepository(OrderItem)
+    private readonly orderItemRepository: Repository<OrderItem>,
+    @InjectRepository(OrderStatus)
+    private readonly orderStatusRepository: Repository<OrderStatus>,
   ) {}
 
   async create(createOrderDto: CreateOrderDto): Promise<Order> {
-    const order = this.orderRepository.create(createOrderDto);
-    return await this.orderRepository.save(order);
+    const {
+      client_id,
+      restaurant_id,
+      statut_id,
+      description,
+      subtotal,
+      delivery_costs,
+      service_charge,
+      global_discount,
+      street_number,
+      street,
+      city,
+      postal_code,
+      country,
+      long,
+      lat,
+      items,
+    } = createOrderDto;
+
+    // Vérifier que le statut existe
+    const status = await this.orderStatusRepository.findOne({
+      where: { id: statut_id },
+    });
+    if (!status) {
+      throw new NotFoundException(
+        `Statut de commande ${statut_id} introuvable`,
+      );
+    }
+
+    // Vérifier que le subtotal correspond aux articles
+    const calculatedSubtotal = items.reduce(
+      (sum, item) => sum + item.unit_price * item.quantity,
+      0,
+    );
+    if (Math.abs(calculatedSubtotal - subtotal) > 0.01) {
+      throw new BadRequestException(
+        'Le sous-total fourni ne correspond pas aux articles',
+      );
+    }
+
+    try {
+      // Créer la commande avec tous les champs, y compris l'adresse
+      const order = this.orderRepository.create({
+        client_id,
+        restaurant_id,
+        status_id: statut_id,
+        description,
+        subtotal,
+        delivery_costs,
+        service_charge,
+        global_discount: global_discount || 0,
+        street_number,
+        street,
+        city,
+        postal_code,
+        country,
+        long,
+        lat,
+      });
+
+      // Sauvegarder la commande pour obtenir un ID
+      const savedOrder = await this.orderRepository.save(order);
+
+      // Créer et associer les OrderItems
+      const orderItems = items.map((item) =>
+        this.orderItemRepository.create({
+          order_id: savedOrder.id,
+          menu_item_id: item.menu_item_id,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          notes: item.notes,
+          selected_option_value_ids: item.selected_option_value_ids,
+        }),
+      );
+
+      // Sauvegarder les OrderItems
+      savedOrder.orderItems = await this.orderItemRepository.save(orderItems);
+
+      return savedOrder;
+    } catch (error) {
+      throw new BadRequestException(
+        `Erreur lors de la sauvegarde de la commande: ${error.message}`,
+      );
+    }
   }
 
-  //PAS OPE
   async findOne(id: number): Promise<Order> {
-    return await this.orderRepository.findOneOrFail({ where: { id } });
+    try {
+      const order = await this.orderRepository.findOne({
+        where: { id },
+        relations: ['orderItems', 'status'],
+      });
+      if (!order) {
+        throw new NotFoundException(`Commande ${id} introuvable`);
+      }
+      return order;
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException(
+        `Erreur lors de la récupération de la commande: ${error.message}`,
+      );
+    }
+  }
+
+  async findByClient(
+    clientId: number,
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<{ orders: Order[]; total: number }> {
+    try {
+      const [orders, total] = await this.orderRepository.findAndCount({
+        where: { client_id: clientId },
+        relations: ['orderItems', 'status'],
+        order: { created_at: 'DESC' },
+        skip: (page - 1) * limit,
+        take: limit,
+      });
+
+      return { orders, total };
+    } catch (error) {
+      throw new BadRequestException(
+        `Erreur lors de la récupération des commandes: ${error.message}`,
+      );
+    }
+  }
+
+  async findByRestaurant(
+    restaurantId: number,
+    page: number = 1,
+    limit: number = 10,
+    filters: FilterRestaurantOrdersDto = {}, // Ajout des filtres
+  ): Promise<{ orders: Order[]; total: number }> {
+    try {
+      const ordersQuery = this.orderRepository
+        .createQueryBuilder('order')
+        .select([
+          'order.id',
+          'order.client_id',
+          'order.restaurant_id',
+          'order.status_id',
+          'order.subtotal',
+          'order.delivery_costs',
+          'order.service_charge',
+          'order.global_discount',
+          'order.street_number',
+          'order.street',
+          'order.city',
+          'order.postal_code',
+          'order.country',
+          'order.long',
+          'order.lat',
+          'order.created_at',
+          'COUNT(orderItems.id) AS items_count',
+          'status.id AS status_id',
+          'status.name AS status_name',
+          'status.created_at AS status_created_at',
+          'status.updated_at AS status_updated_at',
+        ])
+        .leftJoin('order.orderItems', 'orderItems')
+        .leftJoin('order.status', 'status')
+        .where('order.restaurant_id = :restaurantId', { restaurantId });
+
+      // Appliquer le filtre status_id si fourni
+      if (filters.status_id) {
+        ordersQuery.andWhere('order.status_id = :status_id', {
+          status_id: filters.status_id,
+        });
+      }
+
+      ordersQuery
+        .groupBy('order.id')
+        .addGroupBy('status.id')
+        .orderBy('order.created_at', 'DESC')
+        .skip((page - 1) * limit)
+        .take(limit);
+
+      const [rawResults, total] = await Promise.all([
+        ordersQuery.getRawAndEntities(),
+        this.orderRepository.count({
+          where: {
+            restaurant_id: restaurantId,
+            ...(filters.status_id && { status_id: filters.status_id }),
+          },
+        }),
+      ]);
+
+      const orders = rawResults.entities.map((order) => {
+        const raw = rawResults.raw.find((r) => r.order_id === order.id);
+        return {
+          ...order,
+          items_count: parseInt(raw?.items_count || '0', 10),
+          status: {
+            id: raw?.status_id,
+            name: raw?.status_name,
+            created_at: raw?.status_created_at,
+            updated_at: raw?.status_updated_at,
+          },
+        };
+      });
+
+      return { orders, total };
+    } catch (error) {
+      throw new BadRequestException(
+        `Erreur lors de la récupération des commandes: ${error.message}`,
+      );
+    }
+  }
+
+  async findForDelivery(
+    filters: FilterDelivererOrdersDto,
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<{ orders: Order[]; total: number }> {
+    try {
+      // Fetch orders with status_id = 2 (En attente de prise en charge par un livreur)
+      const [allOrders, totalBeforeFilter] = await this.orderRepository.findAndCount({
+        where: { status_id: 2 },
+        relations: ['orderItems', 'status'],
+        order: { created_at: 'DESC' },
+      });
+
+      // Apply geolocation filter if lat, long, and perimeter are provided
+      let filteredOrders = allOrders;
+      if (filters.lat && filters.long && filters.perimeter) {
+        const center = { latitude: filters.lat, longitude: filters.long };
+        filteredOrders = allOrders.filter((order) => {
+          if (order.lat == null || order.long == null) return false;
+
+          const distance = geolib.getDistance(center, {
+            latitude: order.lat,
+            longitude: order.long,
+          });
+
+          return distance <= filters.perimeter;
+        });
+      }
+
+      // Apply pagination
+      const offset = (page - 1) * limit;
+      const paginatedOrders = filteredOrders.slice(offset, offset + limit);
+      const total = filteredOrders.length;
+
+      return { orders: paginatedOrders, total };
+    } catch (error) {
+      throw new BadRequestException(
+        `Erreur lors de la récupération des commandes pour livraison: ${error.message}`,
+      );
+    }
+  }
+
+  async updateStatus(id: number, updateOrderStatusDto: UpdateOrderStatusDto): Promise<Order> {
+    try {
+      // Vérifier que la commande existe
+      const order = await this.orderRepository.findOne({
+        where: { id },
+        relations: ['orderItems', 'status'],
+      });
+      if (!order) {
+        throw new NotFoundException(`Commande ${id} introuvable`);
+      }
+
+      // Vérifier que le nouveau statut existe
+      const status = await this.orderStatusRepository.findOne({
+        where: { id: updateOrderStatusDto.status_id },
+      });
+      if (!status) {
+        throw new NotFoundException(
+          `Statut de commande ${updateOrderStatusDto.status_id} introuvable`,
+        );
+      }
+
+      // Mettre à jour le statut
+      order.status_id = updateOrderStatusDto.status_id;
+      const updatedOrder = await this.orderRepository.save(order);
+
+      // Construire la réponse avec le nouveau statut
+      updatedOrder.status = status;
+      return updatedOrder;
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException(
+        `Erreur lors de la mise à jour du statut de la commande: ${error.message}`,
+      );
+    }
   }
 }

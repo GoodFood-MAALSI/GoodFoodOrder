@@ -20,14 +20,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const exceptionResponse =
       exception instanceof HttpException ? exception.getResponse() : null;
 
-    const message =
+    // Si exceptionResponse est un objet, le retourner tel quel
+    const errorResponse =
       exceptionResponse && typeof exceptionResponse === 'object'
-        ? (exceptionResponse as any).message || 'Unexpected error'
-        : exceptionResponse || 'Internal server error';
+        ? exceptionResponse
+        : {
+            statusCode: status,
+            message: exceptionResponse || 'Internal server error',
+          };
 
-    response.status(status).json({
-      statusCode: status,
-      message
-    });
+    response.status(status).json(errorResponse);
   }
 }

@@ -10,6 +10,7 @@
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
+    "start:dev:with-seed": "concurrently \"npm run start:dev\" \"wait-on http://localhost:3005 && npm run seed\"",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
@@ -21,7 +22,8 @@
     "migration:create": "typeorm migration:create",
     "migration:generate": "typeorm migration:generate -d dist/database/data-source -p",
     "migration:run": "typeorm migration:run -d dist/database/data-source",
-    "migration:revert": "typeorm migration:revert -d dist/database/data-source"
+    "migration:revert": "typeorm migration:revert -d dist/database/data-source",
+    "seed": "ts-node -r tsconfig-paths/register src/database/seed.ts"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.0",
@@ -35,13 +37,17 @@
     "@nestjs/typeorm": "^11.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
+    "concurrently": "^9.1.2",
     "dotenv": "^16.5.0",
+    "geolib": "^3.3.4",
     "jsonwebtoken": "^9.0.2",
     "kafkajs": "^2.2.4",
     "pg": "^8.15.6",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "typeorm": "^0.3.22"
+    "typeorm": "^0.3.22",
+    "typeorm-extension": "^3.7.1",
+    "wait-on": "^8.0.3"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",

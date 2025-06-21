@@ -1,18 +1,16 @@
+import 'dotenv/config';
 import { DataSource } from 'typeorm';
-import { ConfigService } from '@nestjs/config';
-
-const configService = new ConfigService();
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
-  host: configService.get<string>('DATABASE_HOST', '127.0.0.1'),
-  port: configService.get<number>('DATABASE_PORT', 5437),
-  username: configService.get<string>('DATABASE_USERNAME', 'user'),
-  password: configService.get<string>('DATABASE_PASSWORD', 'k?:u-Nu4&FM68Q!1Ez'),
-  database: configService.get<string>('DATABASE_NAME', 'goodfood_client'),
-  entities: ['dist/domain/**/*.entity.js'],
-  migrations: ['dist/database/migrations/*.js'],
-  synchronize: configService.get<string>('DATABASE_SYNCHRONIZE', 'true') === 'true',
+  host: process.env.DATABASE_HOST,
+  port: parseInt(process.env.DATABASE_PORT),
+  username: process.env.DATABASE_USERNAME,
+  password: process.env.DATABASE_PASSWORD,
+  database: process.env.DATABASE_NAME,
+  entities: [process.env.NODE_ENV === 'production' ? 'dist/domain/**/*.entity.js' : 'src/domain/**/*.entity{.ts,.js}'],
+  migrations: [process.env.NODE_ENV === 'production' ? 'dist/database/migrations/*.js' : 'src/database/migrations/*{.ts,.js}'],
+  synchronize: process.env.DATABASE_SYNCHRONIZE === 'true',
   logging: true,
 });
 

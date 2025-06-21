@@ -7,3 +7,4 @@ npm-debug.log
 .env
 sonar-project.properties
 docker-compose.yaml
+tsconfig.build.tsbuildinfo
