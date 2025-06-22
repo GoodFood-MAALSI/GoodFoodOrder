@@ -1,6 +1,6 @@
-import { IsNumber, IsOptional, Min } from 'class-validator';
-import { Type } from 'class-transformer';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsInt, IsNumber, IsOptional, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class FilterDelivererOrdersDto {
   @ApiProperty({
@@ -33,4 +33,24 @@ export class FilterDelivererOrdersDto {
   @Min(100, { message: 'Le périmètre doit être d’au moins 100 mètres' })
   @Type(() => Number)
   perimeter?: number;
+
+  @ApiPropertyOptional({
+    description: 'Numéro de la page pour la pagination',
+    example: 1,
+    type: Number,
+  })
+  @IsOptional()
+  @IsInt()
+  @Transform(({ value }) => (value ? parseInt(value, 10) : 1))
+  page?: number;
+
+  @ApiPropertyOptional({
+    description: "Nombre d'éléments par page pour la pagination",
+    example: 10,
+    type: Number,
+  })
+  @IsOptional()
+  @IsInt()
+  @Transform(({ value }) => (value ? parseInt(value, 10) : 10))
+  limit?: number;
 }

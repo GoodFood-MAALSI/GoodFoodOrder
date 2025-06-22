@@ -36,56 +36,26 @@ export class OrderController {
   @ApiOperation({
     summary: 'Récupérer les commandes en attente pour un livreur',
   })
-  @ApiQuery({
-    name: 'lat',
-    description: 'Latitude du livreur',
-    required: false,
-    type: Number,
-  })
-  @ApiQuery({
-    name: 'long',
-    description: 'Longitude du livreur',
-    required: false,
-    type: Number,
-  })
-  @ApiQuery({
-    name: 'perimeter',
-    description: 'Périmètre en mètres pour filtrer les commandes',
-    required: false,
-    type: Number,
-  })
-  @ApiQuery({
-    name: 'page',
-    required: false,
-    type: Number,
-    description: 'Numéro de page',
-    example: 1,
-  })
-  @ApiQuery({
-    name: 'limit',
-    required: false,
-    type: Number,
-    description: 'Nombre maximum d’items par page',
-    example: 10,
-  })
   async findForDelivery(
     @Query() filters: FilterDelivererOrdersDto,
-    @Query('page') page: number = 1,
-    @Query('limit') limit: number = 10,
     @Req() req: Request,
   ) {
     try {
+      const { page = 1, limit = 10 } = filters;
+
       const { orders, total } = await this.orderService.findForDelivery(
         filters,
         page,
         limit,
       );
+
       const { links, meta } = Pagination.generatePaginationMetadata(
         req,
         page,
         total,
         limit,
       );
+
       return { orders, links, meta };
     } catch (error) {
       throw new HttpException(
@@ -203,37 +173,9 @@ export class OrderController {
 
   @Get('restaurant/:restaurantId')
   @ApiOperation({ summary: 'Récupérer les commandes d’un restaurant' })
-  @ApiParam({
-    name: 'restaurantId',
-    description: 'ID du restaurant',
-    type: Number,
-  })
-  @ApiQuery({
-    name: 'status_id',
-    description: 'ID du statut pour filtrer les commandes',
-    required: false,
-    type: Number,
-    example: 2,
-  })
-  @ApiQuery({
-    name: 'page',
-    required: false,
-    type: Number,
-    description: 'Numéro de page',
-    example: 1,
-  })
-  @ApiQuery({
-    name: 'limit',
-    required: false,
-    type: Number,
-    description: 'Nombre maximum d’items par page',
-    example: 10,
-  })
   async findByRestaurant(
     @Param('restaurantId') restaurantId: string,
-    @Query('page') page: number = 1,
-    @Query('limit') limit: number = 10,
-    @Query() filters: FilterRestaurantOrdersDto,
+    @Query() filters: FilterRestaurantOrdersDto, // Contient page, limit, etc.
     @Req() req: Request,
   ) {
     try {
@@ -241,12 +183,16 @@ export class OrderController {
       if (isNaN(restaurantIdNum)) {
         throw new BadRequestException('restaurantId doit être un nombre');
       }
+
+      const { page = 1, limit = 10 } = filters;
+
       const { orders, total } = await this.orderService.findByRestaurant(
         restaurantIdNum,
         page,
         limit,
         filters,
       );
+
       const { links, meta } = Pagination.generatePaginationMetadata(
         req,
         page,
