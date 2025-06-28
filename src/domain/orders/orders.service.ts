@@ -29,7 +29,7 @@ export class OrderService {
     const {
       client_id,
       restaurant_id,
-      statut_id,
+      status_id,
       description,
       subtotal,
       delivery_costs,
@@ -47,11 +47,11 @@ export class OrderService {
 
     // Vérifier que le statut existe
     const status = await this.orderStatusRepository.findOne({
-      where: { id: statut_id },
+      where: { id: status_id },
     });
     if (!status) {
       throw new NotFoundException(
-        `Statut de commande ${statut_id} introuvable`,
+        `Statut de commande ${status_id} introuvable`,
       );
     }
 
@@ -71,7 +71,7 @@ export class OrderService {
       const order = this.orderRepository.create({
         client_id,
         restaurant_id,
-        status_id: statut_id,
+        status_id: status_id,
         description,
         subtotal,
         delivery_costs,
@@ -243,11 +243,12 @@ export class OrderService {
   ): Promise<{ orders: Order[]; total: number }> {
     try {
       // Fetch orders with status_id = 2 (En attente de prise en charge par un livreur)
-      const [allOrders, totalBeforeFilter] = await this.orderRepository.findAndCount({
-        where: { status_id: 2 },
-        relations: ['orderItems', 'status'],
-        order: { created_at: 'DESC' },
-      });
+      const [allOrders, totalBeforeFilter] =
+        await this.orderRepository.findAndCount({
+          where: { status_id: 2 },
+          relations: ['orderItems', 'status'],
+          order: { created_at: 'DESC' },
+        });
 
       // Apply geolocation filter if lat, long, and perimeter are provided
       let filteredOrders = allOrders;
@@ -278,9 +279,11 @@ export class OrderService {
     }
   }
 
-  async updateStatus(id: number, updateOrderStatusDto: UpdateOrderStatusDto): Promise<Order> {
+  async updateStatus(
+    id: number,
+    updateOrderStatusDto: UpdateOrderStatusDto,
+  ): Promise<Order> {
     try {
-      // Vérifier que la commande existe
       const order = await this.orderRepository.findOne({
         where: { id },
         relations: ['orderItems', 'status'],
@@ -289,7 +292,6 @@ export class OrderService {
         throw new NotFoundException(`Commande ${id} introuvable`);
       }
 
-      // Vérifier que le nouveau statut existe
       const status = await this.orderStatusRepository.findOne({
         where: { id: updateOrderStatusDto.status_id },
       });
@@ -299,19 +301,24 @@ export class OrderService {
         );
       }
 
-      // Mettre à jour le statut
+      // Mettre à jour à la fois status_id et la relation status
       order.status_id = updateOrderStatusDto.status_id;
-      const updatedOrder = await this.orderRepository.save(order);
+      order.status = status;
 
-      // Construire la réponse avec le nouveau statut
-      updatedOrder.status = status;
-      return updatedOrder;
+      await this.orderRepository.save(order);
+
+      const reloadedOrder = await this.orderRepository.findOne({
+        where: { id },
+        relations: ['orderItems', 'status'],
+      });
+
+      return reloadedOrder;
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
       throw new BadRequestException(
-        `Erreur lors de la mise à jour du statut de la commande: ${error.message}`,
+        `Erreur lors de la mise à jour du statut de la commande : ${error.message}`,
       );
     }
   }

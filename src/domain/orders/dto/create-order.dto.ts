@@ -63,7 +63,7 @@ export class CreateOrderDto {
     default: 1,
   })
   @IsInt()
-  statut_id: number = 1;
+  status_id: number = 1;
 
   @ApiProperty({
     example: 'Livraison rapide souhaitée',

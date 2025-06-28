@@ -221,10 +221,13 @@ export class OrderController {
     @Body() updateOrderStatusDto: UpdateOrderStatusDto,
   ) {
     try {
-      const idNum = parseInt(id);
+      const idNum = parseInt(id, 10);
       if (isNaN(idNum)) {
-        throw new BadRequestException('id doit être un nombre');
+        throw new BadRequestException(
+          "L'ID de la commande doit être un nombre",
+        );
       }
+
       return await this.orderService.updateStatus(idNum, updateOrderStatusDto);
     } catch (error) {
       if (error instanceof NotFoundException) {
@@ -237,6 +240,7 @@ export class OrderController {
           HttpStatus.NOT_FOUND,
         );
       }
+
       throw new HttpException(
         {
           statusCode: HttpStatus.BAD_REQUEST,
