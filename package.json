@@ -42,6 +42,7 @@
     "geolib": "^3.3.4",
     "jsonwebtoken": "^9.0.2",
     "kafkajs": "^2.2.4",
+    "path": "^0.12.7",
     "pg": "^8.15.6",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
