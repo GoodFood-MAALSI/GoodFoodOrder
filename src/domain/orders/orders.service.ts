@@ -10,9 +10,10 @@ import { OrderItem } from '../order-items/entities/order-items.entity';
 import { OrderStatus } from '../order-status/entities/order-status.entity';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
-import * as geolib from 'geolib';
 import { FilterDelivererOrdersDto } from './dto/filter-deliverer-orders.dto';
 import { FilterRestaurantOrdersDto } from './dto/filter-restaurant-orders.dto';
+import { FilterOrdersDto } from './dto/filter-orders.dto';
+import * as geolib from 'geolib';
 
 @Injectable()
 export class OrderService {
@@ -112,6 +113,85 @@ export class OrderService {
     }
   }
 
+  async findAll(
+    filters: FilterOrdersDto,
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<{ orders: Order[]; total: number }> {
+    try {
+      const ordersQuery = this.orderRepository
+        .createQueryBuilder('order')
+        .select([
+          'order.id',
+          'order.client_id',
+          'order.restaurant_id',
+          'order.status_id',
+          'order.subtotal',
+          'order.delivery_costs',
+          'order.service_charge',
+          'order.global_discount',
+          'order.street_number',
+          'order.street',
+          'order.city',
+          'order.postal_code',
+          'order.country',
+          'order.long',
+          'order.lat',
+          'order.created_at',
+          'COUNT(orderItems.id) AS items_count',
+          'status.id AS status_id',
+          'status.name AS status_name',
+          'status.created_at AS status_created_at',
+          'status.updated_at AS status_updated_at',
+        ])
+        .leftJoin('order.orderItems', 'orderItems')
+        .leftJoin('order.status', 'status');
+
+      // Appliquer le filtre status_id si fourni
+      if (filters.status_id) {
+        ordersQuery.andWhere('order.status_id = :status_id', {
+          status_id: filters.status_id,
+        });
+      }
+
+      ordersQuery
+        .groupBy('order.id')
+        .addGroupBy('status.id')
+        .orderBy('order.created_at', 'DESC')
+        .skip((page - 1) * limit)
+        .take(limit);
+
+      const [rawResults, total] = await Promise.all([
+        ordersQuery.getRawAndEntities(),
+        this.orderRepository.count({
+          where: {
+            ...(filters.status_id && { status_id: filters.status_id }),
+          },
+        }),
+      ]);
+
+      const orders = rawResults.entities.map((order) => {
+        const raw = rawResults.raw.find((r) => r.order_id === order.id);
+        return {
+          ...order,
+          items_count: parseInt(raw?.items_count || '0', 10),
+          status: {
+            id: raw?.status_id,
+            name: raw?.status_name,
+            created_at: raw?.status_created_at,
+            updated_at: raw?.status_updated_at,
+          },
+        };
+      });
+
+      return { orders, total };
+    } catch (error) {
+      throw new BadRequestException(
+        `Erreur lors de la récupération des commandes: ${error.message}`,
+      );
+    }
+  }
+
   async findOne(id: number): Promise<Order> {
     try {
       const order = await this.orderRepository.findOne({
@@ -158,7 +238,7 @@ export class OrderService {
     restaurantId: number,
     page: number = 1,
     limit: number = 10,
-    filters: FilterRestaurantOrdersDto = {}, // Ajout des filtres
+    filters: FilterRestaurantOrdersDto = {},
   ): Promise<{ orders: Order[]; total: number }> {
     try {
       const ordersQuery = this.orderRepository

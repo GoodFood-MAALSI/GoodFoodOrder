@@ -17,6 +17,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { FilterDelivererOrdersDto } from './dto/filter-deliverer-orders.dto';
 import { FilterRestaurantOrdersDto } from './dto/filter-restaurant-orders.dto';
+import { FilterOrdersDto } from './dto/filter-orders.dto';
 import {
   ApiBody,
   ApiOperation,
@@ -31,6 +32,62 @@ import { Pagination } from '../utils/pagination';
 @ApiTags('Orders')
 export class OrderController {
   constructor(private readonly orderService: OrderService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'Récupérer toutes les commandes' })
+  @ApiQuery({
+    name: 'status_id',
+    required: false,
+    type: Number,
+    description: 'ID du statut pour filtrer les commandes',
+    example: 1,
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Numéro de page',
+    example: 1,
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Nombre maximum d’items par page',
+    example: 10,
+  })
+  async findAll(
+    @Query() filters: FilterOrdersDto,
+    @Req() req: Request,
+  ) {
+    try {
+      const { page = 1, limit = 10 } = filters;
+
+      const { orders, total } = await this.orderService.findAll(
+        filters,
+        page,
+        limit,
+      );
+
+      const { links, meta } = Pagination.generatePaginationMetadata(
+        req,
+        page,
+        total,
+        limit,
+      );
+
+      return { orders, links, meta };
+    } catch (error) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Échec de la récupération des commandes',
+          error: error.message,
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
 
   @Get('delivery')
   @ApiOperation({
@@ -175,7 +232,7 @@ export class OrderController {
   @ApiOperation({ summary: 'Récupérer les commandes d’un restaurant' })
   async findByRestaurant(
     @Param('restaurantId') restaurantId: string,
-    @Query() filters: FilterRestaurantOrdersDto, // Contient page, limit, etc.
+    @Query() filters: FilterRestaurantOrdersDto,
     @Req() req: Request,
   ) {
     try {
