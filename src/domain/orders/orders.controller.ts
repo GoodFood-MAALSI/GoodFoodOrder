@@ -15,7 +15,7 @@ import {
 import { Request } from 'express';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
-import { FilterDelivererOrdersDto } from './dto/filter-deliverer-orders.dto';
+import { FilterSearchForDelivererOrdersDto } from './dto/filter-search-for-deliverer-orders.dto';
 import { FilterRestaurantOrdersDto } from './dto/filter-restaurant-orders.dto';
 import { FilterOrdersDto } from './dto/filter-orders.dto';
 import {
@@ -27,6 +27,7 @@ import {
 } from '@nestjs/swagger';
 import { OrderService } from './orders.service';
 import { Pagination } from '../utils/pagination';
+import { FilterDelivererOrdersDto } from './dto/filter-deliverer-orders.dto';
 
 @Controller('orders')
 @ApiTags('Orders')
@@ -35,39 +36,11 @@ export class OrderController {
 
   @Get()
   @ApiOperation({ summary: 'Récupérer toutes les commandes' })
-  @ApiQuery({
-    name: 'status_id',
-    required: false,
-    type: Number,
-    description: 'ID du statut pour filtrer les commandes',
-    example: 1,
-  })
-  @ApiQuery({
-    name: 'page',
-    required: false,
-    type: Number,
-    description: 'Numéro de page',
-    example: 1,
-  })
-  @ApiQuery({
-    name: 'limit',
-    required: false,
-    type: Number,
-    description: 'Nombre maximum d’items par page',
-    example: 10,
-  })
-  async findAll(
-    @Query() filters: FilterOrdersDto,
-    @Req() req: Request,
-  ) {
+  async findAll(@Query() filters: FilterOrdersDto, @Req() req: Request) {
     try {
       const { page = 1, limit = 10 } = filters;
 
-      const { orders, total } = await this.orderService.findAll(
-        filters,
-        page,
-        limit,
-      );
+      const { orders, total } = await this.orderService.findAll(filters);
 
       const { links, meta } = Pagination.generatePaginationMetadata(
         req,
@@ -94,7 +67,7 @@ export class OrderController {
     summary: 'Récupérer les commandes en attente pour un livreur',
   })
   async findForDelivery(
-    @Query() filters: FilterDelivererOrdersDto,
+    @Query() filters: FilterSearchForDelivererOrdersDto,
     @Req() req: Request,
   ) {
     try {
@@ -230,6 +203,11 @@ export class OrderController {
 
   @Get('restaurant/:restaurantId')
   @ApiOperation({ summary: 'Récupérer les commandes d’un restaurant' })
+  @ApiParam({
+    name: 'restaurantId',
+    description: 'ID du restaurant',
+    type: Number,
+  })
   async findByRestaurant(
     @Param('restaurantId') restaurantId: string,
     @Query() filters: FilterRestaurantOrdersDto,
@@ -241,15 +219,55 @@ export class OrderController {
         throw new BadRequestException('restaurantId doit être un nombre');
       }
 
-      const { page = 1, limit = 10 } = filters;
-
       const { orders, total } = await this.orderService.findByRestaurant(
         restaurantIdNum,
-        page,
-        limit,
         filters,
       );
 
+      const { page = 1, limit = 10 } = filters;
+      const { links, meta } = Pagination.generatePaginationMetadata(
+        req,
+        page,
+        total,
+        limit,
+      );
+      return { orders, links, meta };
+    } catch (error) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Échec de la récupération des commandes',
+          error: error.message,
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Get('deliverer/:delivererId')
+  @ApiOperation({ summary: 'Récupérer les commandes d’un livreur' })
+  @ApiParam({
+    name: 'delivererId',
+    description: 'ID du livreur',
+    type: Number,
+  })
+  async findByDeliverer(
+    @Param('delivererId') delivererId: string,
+    @Query() filters: FilterDelivererOrdersDto,
+    @Req() req: Request,
+  ) {
+    try {
+      const delivererIdNum = parseInt(delivererId);
+      if (isNaN(delivererIdNum)) {
+        throw new BadRequestException('delivererId doit être un nombre');
+      }
+
+      const { orders, total } = await this.orderService.findByDeliverer(
+        delivererIdNum,
+        filters,
+      );
+
+      const { page = 1, limit = 10 } = filters;
       const { links, meta } = Pagination.generatePaginationMetadata(
         req,
         page,

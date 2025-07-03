@@ -4,16 +4,17 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { Order } from './entities/order.entity';
 import { OrderItem } from '../order-items/entities/order-items.entity';
 import { OrderStatus } from '../order-status/entities/order-status.entity';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
-import { FilterDelivererOrdersDto } from './dto/filter-deliverer-orders.dto';
+import { FilterSearchForDelivererOrdersDto } from './dto/filter-search-for-deliverer-orders.dto';
 import { FilterRestaurantOrdersDto } from './dto/filter-restaurant-orders.dto';
 import { FilterOrdersDto } from './dto/filter-orders.dto';
 import * as geolib from 'geolib';
+import { FilterDelivererOrdersDto } from './dto/filter-deliverer-orders.dto';
 
 @Injectable()
 export class OrderService {
@@ -115,73 +116,21 @@ export class OrderService {
 
   async findAll(
     filters: FilterOrdersDto,
-    page: number = 1,
-    limit: number = 10,
   ): Promise<{ orders: Order[]; total: number }> {
     try {
-      const ordersQuery = this.orderRepository
-        .createQueryBuilder('order')
-        .select([
-          'order.id',
-          'order.client_id',
-          'order.restaurant_id',
-          'order.status_id',
-          'order.subtotal',
-          'order.delivery_costs',
-          'order.service_charge',
-          'order.global_discount',
-          'order.street_number',
-          'order.street',
-          'order.city',
-          'order.postal_code',
-          'order.country',
-          'order.long',
-          'order.lat',
-          'order.created_at',
-          'COUNT(orderItems.id) AS items_count',
-          'status.id AS status_id',
-          'status.name AS status_name',
-          'status.created_at AS status_created_at',
-          'status.updated_at AS status_updated_at',
-        ])
-        .leftJoin('order.orderItems', 'orderItems')
-        .leftJoin('order.status', 'status');
+      const { page = 1, limit = 10, status_id } = filters;
 
-      // Appliquer le filtre status_id si fourni
-      if (filters.status_id) {
-        ordersQuery.andWhere('order.status_id = :status_id', {
-          status_id: filters.status_id,
-        });
+      const where: any = {};
+      if (status_id) {
+        where.status_id = status_id;
       }
 
-      ordersQuery
-        .groupBy('order.id')
-        .addGroupBy('status.id')
-        .orderBy('order.created_at', 'DESC')
-        .skip((page - 1) * limit)
-        .take(limit);
-
-      const [rawResults, total] = await Promise.all([
-        ordersQuery.getRawAndEntities(),
-        this.orderRepository.count({
-          where: {
-            ...(filters.status_id && { status_id: filters.status_id }),
-          },
-        }),
-      ]);
-
-      const orders = rawResults.entities.map((order) => {
-        const raw = rawResults.raw.find((r) => r.order_id === order.id);
-        return {
-          ...order,
-          items_count: parseInt(raw?.items_count || '0', 10),
-          status: {
-            id: raw?.status_id,
-            name: raw?.status_name,
-            created_at: raw?.status_created_at,
-            updated_at: raw?.status_updated_at,
-          },
-        };
+      const [orders, total] = await this.orderRepository.findAndCount({
+        where,
+        relations: ['orderItems', 'status'],
+        order: { created_at: 'DESC' },
+        skip: (page - 1) * limit,
+        take: limit,
       });
 
       return { orders, total };
@@ -236,76 +185,22 @@ export class OrderService {
 
   async findByRestaurant(
     restaurantId: number,
-    page: number = 1,
-    limit: number = 10,
     filters: FilterRestaurantOrdersDto = {},
   ): Promise<{ orders: Order[]; total: number }> {
     try {
-      const ordersQuery = this.orderRepository
-        .createQueryBuilder('order')
-        .select([
-          'order.id',
-          'order.client_id',
-          'order.restaurant_id',
-          'order.status_id',
-          'order.subtotal',
-          'order.delivery_costs',
-          'order.service_charge',
-          'order.global_discount',
-          'order.street_number',
-          'order.street',
-          'order.city',
-          'order.postal_code',
-          'order.country',
-          'order.long',
-          'order.lat',
-          'order.created_at',
-          'COUNT(orderItems.id) AS items_count',
-          'status.id AS status_id',
-          'status.name AS status_name',
-          'status.created_at AS status_created_at',
-          'status.updated_at AS status_updated_at',
-        ])
-        .leftJoin('order.orderItems', 'orderItems')
-        .leftJoin('order.status', 'status')
-        .where('order.restaurant_id = :restaurantId', { restaurantId });
+      const { page = 1, limit = 10, status_id } = filters;
 
-      // Appliquer le filtre status_id si fourni
-      if (filters.status_id) {
-        ordersQuery.andWhere('order.status_id = :status_id', {
-          status_id: filters.status_id,
-        });
+      const where: any = { restaurant_id: restaurantId };
+      if (status_id) {
+        where.status_id = status_id;
       }
 
-      ordersQuery
-        .groupBy('order.id')
-        .addGroupBy('status.id')
-        .orderBy('order.created_at', 'DESC')
-        .skip((page - 1) * limit)
-        .take(limit);
-
-      const [rawResults, total] = await Promise.all([
-        ordersQuery.getRawAndEntities(),
-        this.orderRepository.count({
-          where: {
-            restaurant_id: restaurantId,
-            ...(filters.status_id && { status_id: filters.status_id }),
-          },
-        }),
-      ]);
-
-      const orders = rawResults.entities.map((order) => {
-        const raw = rawResults.raw.find((r) => r.order_id === order.id);
-        return {
-          ...order,
-          items_count: parseInt(raw?.items_count || '0', 10),
-          status: {
-            id: raw?.status_id,
-            name: raw?.status_name,
-            created_at: raw?.status_created_at,
-            updated_at: raw?.status_updated_at,
-          },
-        };
+      const [orders, total] = await this.orderRepository.findAndCount({
+        where,
+        relations: ['orderItems', 'status'],
+        order: { created_at: 'DESC' },
+        skip: (page - 1) * limit,
+        take: limit,
       });
 
       return { orders, total };
@@ -317,15 +212,18 @@ export class OrderService {
   }
 
   async findForDelivery(
-    filters: FilterDelivererOrdersDto,
+    filters: FilterSearchForDelivererOrdersDto,
     page: number = 1,
     limit: number = 10,
   ): Promise<{ orders: Order[]; total: number }> {
     try {
       // Fetch orders with status_id = 2 (En attente de prise en charge par un livreur)
-      const [allOrders, totalBeforeFilter] =
+      const [allOrders] =
         await this.orderRepository.findAndCount({
-          where: { status_id: 2 },
+          where: {
+            deliverer_id: IsNull(),
+            status_id: 2 
+          },
           relations: ['orderItems', 'status'],
           order: { created_at: 'DESC' },
         });
@@ -355,6 +253,34 @@ export class OrderService {
     } catch (error) {
       throw new BadRequestException(
         `Erreur lors de la récupération des commandes pour livraison: ${error.message}`,
+      );
+    }
+  }
+
+  async findByDeliverer(
+    delivererId: number,
+    filters: FilterDelivererOrdersDto,
+  ): Promise<{ orders: Order[]; total: number }> {
+    try {
+      const { page = 1, limit = 10, status_id } = filters;
+
+      const where: any = { deliverer_id: delivererId };
+      if (status_id) {
+        where.status_id = status_id;
+      }
+
+      const [orders, total] = await this.orderRepository.findAndCount({
+        where,
+        relations: ['orderItems', 'status'],
+        order: { created_at: 'DESC' },
+        skip: (page - 1) * limit,
+        take: limit,
+      });
+
+      return { orders, total };
+    } catch (error) {
+      throw new BadRequestException(
+        `Erreur lors de la récupération des commandes: ${error.message}`,
       );
     }
   }

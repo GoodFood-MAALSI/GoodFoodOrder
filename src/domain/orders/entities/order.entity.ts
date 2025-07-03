@@ -26,6 +26,10 @@ export class Order {
   @Column()
   restaurant_id: number;
 
+  @ApiProperty({ example: null })
+  @Column({ type: 'int', nullable: true, default: null })
+  deliverer_id: number | null;
+
   @ApiProperty({ example: 1 })
   @Column()
   status_id: number;
