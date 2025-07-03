@@ -31,7 +31,6 @@ import { Pagination } from '../utils/pagination';
 import { FilterDelivererOrdersDto } from './dto/filter-deliverer-orders.dto';
 
 @Controller('orders')
-@ApiTags('Orders')
 export class OrderController {
   constructor(private readonly orderService: OrderService) {}
 
