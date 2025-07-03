@@ -24,6 +24,7 @@ import {
   ApiTags,
   ApiParam,
   ApiQuery,
+  ApiResponse,
 } from '@nestjs/swagger';
 import { OrderService } from './orders.service';
 import { Pagination } from '../utils/pagination';
@@ -320,6 +321,47 @@ export class OrderController {
         {
           statusCode: HttpStatus.BAD_REQUEST,
           message: 'Échec de la mise à jour du statut de la commande',
+          error: error.message,
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Patch(':id/cancel')
+  @ApiOperation({ summary: 'Annuler une commande' })
+  @ApiParam({ name: 'id', description: 'ID de la commande', type: Number })
+  @ApiResponse({ status: 200, description: 'Commande annulée avec succès' })
+  @ApiResponse({
+    status: 400,
+    description: 'Requête invalide ou commande déjà annulée',
+  })
+  @ApiResponse({ status: 404, description: 'Commande ou statut introuvable' })
+  async cancel(@Param('id') id: string) {
+    try {
+      const idNum = parseInt(id, 10);
+      if (isNaN(idNum)) {
+        throw new BadRequestException(
+          "L'ID de la commande doit être un nombre",
+        );
+      }
+
+      return await this.orderService.cancelOrder(idNum);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw new HttpException(
+          {
+            statusCode: HttpStatus.NOT_FOUND,
+            message: 'Commande ou statut introuvable',
+            error: error.message,
+          },
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: "Échec de l'annulation de la commande",
           error: error.message,
         },
         HttpStatus.BAD_REQUEST,

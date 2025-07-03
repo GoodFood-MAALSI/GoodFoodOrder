@@ -328,4 +328,46 @@ export class OrderService {
       );
     }
   }
+
+  async cancelOrder(id: number): Promise<Order> {
+  try {
+    const order = await this.orderRepository.findOne({
+      where: { id },
+      relations: ['orderItems', 'status'],
+    });
+    if (!order) {
+      throw new NotFoundException(`Commande ${id} introuvable`);
+    }
+
+    if (order.status_id === 7) {
+      throw new BadRequestException('La commande est déjà annulée');
+    }
+
+    const status = await this.orderStatusRepository.findOne({
+      where: { id: 7 },
+    });
+    if (!status) {
+      throw new NotFoundException('Statut annulé introuvable');
+    }
+
+    order.status_id = 7;
+    order.status = status;
+
+    await this.orderRepository.save(order);
+
+    const reloadedOrder = await this.orderRepository.findOne({
+      where: { id },
+      relations: ['orderItems', 'status'],
+    });
+
+    return reloadedOrder;
+  } catch (error) {
+    if (error instanceof NotFoundException) {
+      throw error;
+    }
+    throw new BadRequestException(
+      `Erreur lors de l'annulation de la commande : ${error.message}`,
+    );
+  }
+}
 }
