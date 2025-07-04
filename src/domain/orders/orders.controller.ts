@@ -29,6 +29,7 @@ import {
 import { OrderService } from './orders.service';
 import { Pagination } from '../utils/pagination';
 import { FilterDelivererOrdersDto } from './dto/filter-deliverer-orders.dto';
+import { StatsOrderByRestaurantFilterDto } from './dto/stats-order-by-restaurant.dto';
 
 @Controller('orders')
 export class OrderController {
@@ -361,6 +362,44 @@ export class OrderController {
         {
           statusCode: HttpStatus.BAD_REQUEST,
           message: "Échec de l'annulation de la commande",
+          error: error.message,
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Get('restaurant/:restaurantId/stats')
+  @ApiOperation({ summary: 'Récupérer les statistiques d’un restaurant' })
+  @ApiParam({
+    name: 'restaurantId',
+    description: 'ID du restaurant',
+    type: Number,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Statistiques récupérées avec succès',
+  })
+  @ApiResponse({ status: 400, description: 'Requête invalide' })
+  async getRestaurantStats(
+    @Param('restaurantId') restaurantId: string,
+    @Query() filters: StatsOrderByRestaurantFilterDto,
+  ) {
+    try {
+      const restaurantIdNum = parseInt(restaurantId);
+      if (isNaN(restaurantIdNum)) {
+        throw new BadRequestException('restaurantId doit être un nombre');
+      }
+
+      return await this.orderService.getRestaurantStats(
+        restaurantIdNum,
+        filters,
+      );
+    } catch (error) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Échec de la récupération des statistiques',
           error: error.message,
         },
         HttpStatus.BAD_REQUEST,

@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { IsNull, MoreThanOrEqual, Repository } from 'typeorm';
 import { Order } from './entities/order.entity';
 import { OrderItem } from '../order-items/entities/order-items.entity';
 import { OrderStatus } from '../order-status/entities/order-status.entity';
@@ -15,6 +15,7 @@ import { FilterRestaurantOrdersDto } from './dto/filter-restaurant-orders.dto';
 import { FilterOrdersDto } from './dto/filter-orders.dto';
 import * as geolib from 'geolib';
 import { FilterDelivererOrdersDto } from './dto/filter-deliverer-orders.dto';
+import { StatsOrderByRestaurantFilterDto } from './dto/stats-order-by-restaurant.dto';
 
 @Injectable()
 export class OrderService {
@@ -218,15 +219,14 @@ export class OrderService {
   ): Promise<{ orders: Order[]; total: number }> {
     try {
       // Fetch orders with status_id = 2 (En attente de prise en charge par un livreur)
-      const [allOrders] =
-        await this.orderRepository.findAndCount({
-          where: {
-            deliverer_id: IsNull(),
-            status_id: 2 
-          },
-          relations: ['orderItems', 'status'],
-          order: { created_at: 'DESC' },
-        });
+      const [allOrders] = await this.orderRepository.findAndCount({
+        where: {
+          deliverer_id: IsNull(),
+          status_id: 2,
+        },
+        relations: ['orderItems', 'status'],
+        order: { created_at: 'DESC' },
+      });
 
       // Apply geolocation filter if lat, long, and perimeter are provided
       let filteredOrders = allOrders;
@@ -330,44 +330,144 @@ export class OrderService {
   }
 
   async cancelOrder(id: number): Promise<Order> {
-  try {
-    const order = await this.orderRepository.findOne({
-      where: { id },
-      relations: ['orderItems', 'status'],
-    });
-    if (!order) {
-      throw new NotFoundException(`Commande ${id} introuvable`);
+    try {
+      const order = await this.orderRepository.findOne({
+        where: { id },
+        relations: ['orderItems', 'status'],
+      });
+      if (!order) {
+        throw new NotFoundException(`Commande ${id} introuvable`);
+      }
+
+      if (order.status_id === 7) {
+        throw new BadRequestException('La commande est déjà annulée');
+      }
+
+      const status = await this.orderStatusRepository.findOne({
+        where: { id: 7 },
+      });
+      if (!status) {
+        throw new NotFoundException('Statut annulé introuvable');
+      }
+
+      order.status_id = 7;
+      order.status = status;
+
+      await this.orderRepository.save(order);
+
+      const reloadedOrder = await this.orderRepository.findOne({
+        where: { id },
+        relations: ['orderItems', 'status'],
+      });
+
+      return reloadedOrder;
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException(
+        `Erreur lors de l'annulation de la commande : ${error.message}`,
+      );
     }
-
-    if (order.status_id === 7) {
-      throw new BadRequestException('La commande est déjà annulée');
-    }
-
-    const status = await this.orderStatusRepository.findOne({
-      where: { id: 7 },
-    });
-    if (!status) {
-      throw new NotFoundException('Statut annulé introuvable');
-    }
-
-    order.status_id = 7;
-    order.status = status;
-
-    await this.orderRepository.save(order);
-
-    const reloadedOrder = await this.orderRepository.findOne({
-      where: { id },
-      relations: ['orderItems', 'status'],
-    });
-
-    return reloadedOrder;
-  } catch (error) {
-    if (error instanceof NotFoundException) {
-      throw error;
-    }
-    throw new BadRequestException(
-      `Erreur lors de l'annulation de la commande : ${error.message}`,
-    );
   }
-}
+
+  async getRestaurantStats(
+    restaurantId: number,
+    filters: StatsOrderByRestaurantFilterDto,
+  ): Promise<{
+    order_count: number;
+    menu_item_id: number | null;
+    item_count: number | null;
+    revenue: number;
+  }> {
+    try {
+      const { period } = filters;
+      const where: any = { restaurant_id: restaurantId };
+
+      // Définir la période de filtrage
+      const today = new Date();
+      if (period) {
+        switch (period) {
+          case 'today':
+            where.created_at = MoreThanOrEqual(
+              new Date(today.setHours(0, 0, 0, 0)),
+            );
+            break;
+          case 'week':
+            const weekStart = new Date(
+              today.setDate(today.getDate() - today.getDay()),
+            );
+            weekStart.setHours(0, 0, 0, 0);
+            where.created_at = MoreThanOrEqual(weekStart);
+            break;
+          case 'month':
+            const monthStart = new Date(
+              today.getFullYear(),
+              today.getMonth(),
+              1,
+            );
+            where.created_at = MoreThanOrEqual(monthStart);
+            break;
+          case 'year':
+            const yearStart = new Date(today.getFullYear(), 0, 1);
+            where.created_at = MoreThanOrEqual(yearStart);
+            break;
+          default:
+            throw new BadRequestException('Période invalide');
+        }
+      }
+
+      // Nombre total de commandes
+      const order_count = await this.orderRepository.count({ where });
+
+      // Article le plus commandé
+      const mostOrderedMenuItem = await this.orderItemRepository
+        .createQueryBuilder('orderItem')
+        .select('orderItem.menu_item_id', 'menu_item_id')
+        .addSelect('SUM(orderItem.quantity)', 'item_count')
+        .leftJoin('orderItem.order', 'order')
+        .where('order.restaurant_id = :restaurantId', { restaurantId })
+        .andWhere(
+          where.created_at ? 'order.created_at >= :created_at' : '1=1',
+          {
+            created_at: where.created_at?.value,
+          },
+        )
+        .groupBy('orderItem.menu_item_id')
+        .orderBy('SUM(orderItem.quantity)', 'DESC')
+        .limit(1)
+        .getRawOne();
+
+      // CA (somme de subtotal - global_discount)
+      const revenueResult = await this.orderRepository
+        .createQueryBuilder('order')
+        .select(
+          'SUM(order.subtotal - COALESCE(order.global_discount, 0))',
+          'revenue',
+        )
+        .where('order.restaurant_id = :restaurantId', { restaurantId })
+        .andWhere(
+          where.created_at ? 'order.created_at >= :created_at' : '1=1',
+          {
+            created_at: where.created_at?.value,
+          },
+        )
+        .getRawOne();
+
+      return {
+        order_count,
+        menu_item_id: mostOrderedMenuItem
+          ? mostOrderedMenuItem.menu_item_id
+          : null,
+        item_count: mostOrderedMenuItem
+          ? parseInt(mostOrderedMenuItem.item_count)
+          : null,
+        revenue: revenueResult ? parseFloat(revenueResult.revenue) || 0 : 0,
+      };
+    } catch (error) {
+      throw new BadRequestException(
+        `Erreur lors de la récupération des statistiques: ${error.message}`,
+      );
+    }
+  }
 }
