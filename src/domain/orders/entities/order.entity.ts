@@ -95,5 +95,5 @@ export class Order {
   status: OrderStatus;
 
   @OneToMany(() => OrderItem, (orderItem) => orderItem.order)
-  orderItems: OrderItem[];
+  orderItems?: OrderItem[];
 }
