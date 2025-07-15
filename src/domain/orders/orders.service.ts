@@ -168,12 +168,40 @@ export class OrderService {
 
       savedOrder.orderItems = await this.orderItemRepository.save(orderItems);
 
-      return this.enrichOrder(savedOrder);
+      return savedOrder;
     } catch (error) {
       throw new BadRequestException(
         `Erreur lors de la sauvegarde de la commande: ${error.message}`,
       );
     }
+  }
+
+  async acceptOrder(orderId: number, delivererId: number): Promise<Order> {
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId }
+    });
+    if (!order) {
+      throw new NotFoundException(`Commande ${orderId} introuvable`);
+    }
+
+    if (order.status_id !== 2) {
+      throw new BadRequestException('La commande doit être au statut 2 pour être acceptée');
+    }
+
+    const status = await this.orderStatusRepository.findOne({
+      where: { id: 3 },
+    });
+    if (!status) {
+      throw new NotFoundException('Statut 3 introuvable');
+    }
+
+    order.status_id = 3;
+    order.status = status;
+    order.deliverer_id = delivererId;
+
+    const updatedOrder = await this.orderRepository.save(order);
+
+    return updatedOrder;
   }
 
   async findAll(
@@ -222,7 +250,7 @@ export class OrderService {
   > {
     const order = await this.orderRepository.findOne({
       where: { id },
-      relations: ['orderItems', 'status'],
+      relations: ['status'],
     });
     if (!order) {
       throw new NotFoundException(`Commande ${id} introuvable`);
@@ -389,8 +417,7 @@ export class OrderService {
     }
   > {
     const order = await this.orderRepository.findOne({
-      where: { id },
-      relations: ['status'],
+      where: { id }
     });
     if (!order) {
       throw new NotFoundException(`Commande ${id} introuvable`);
@@ -412,10 +439,52 @@ export class OrderService {
 
     const reloadedOrder = await this.orderRepository.findOne({
       where: { id },
-      relations: ['orderItems', 'status'],
     });
 
-    return this.enrichOrder(reloadedOrder);
+    return reloadedOrder;
+  }
+
+  async updateStatusAndDeliverer(
+    id: number,
+    updateOrderStatusDto: { status_id: number; deliverer_id: number },
+  ): Promise<
+    Order & {
+      client?: Client;
+      restaurant?: Restaurant;
+      deliverer?: Deliverer;
+      orderItems?: (OrderItem & {
+        menu_item?: MenuItem;
+        menu_item_option_values?: MenuItemOptionValue[];
+      })[];
+    }
+  > {
+    const order = await this.orderRepository.findOne({
+      where: { id }
+    });
+    if (!order) {
+      throw new NotFoundException(`Commande ${id} introuvable`);
+    }
+
+    const status = await this.orderStatusRepository.findOne({
+      where: { id: updateOrderStatusDto.status_id },
+    });
+    if (!status) {
+      throw new NotFoundException(
+        `Statut de commande ${updateOrderStatusDto.status_id} introuvable`,
+      );
+    }
+
+    order.status_id = updateOrderStatusDto.status_id;
+    order.status = status;
+    order.deliverer_id = updateOrderStatusDto.deliverer_id;
+
+    await this.orderRepository.save(order);
+
+    const reloadedOrder = await this.orderRepository.findOne({
+      where: { id }
+    });
+
+    return reloadedOrder;
   }
 
   async cancelOrder(id: number): Promise<
@@ -430,8 +499,7 @@ export class OrderService {
     }
   > {
     const order = await this.orderRepository.findOne({
-      where: { id },
-      relations: ['orderItems', 'status'],
+      where: { id }
     });
     if (!order) {
       throw new NotFoundException(`Commande ${id} introuvable`);
@@ -454,11 +522,10 @@ export class OrderService {
     await this.orderRepository.save(order);
 
     const reloadedOrder = await this.orderRepository.findOne({
-      where: { id },
-      relations: ['orderItems', 'status'],
+      where: { id }
     });
 
-    return this.enrichOrder(reloadedOrder);
+    return reloadedOrder;
   }
 
   async getRestaurantStats(
@@ -552,4 +619,18 @@ export class OrderService {
       revenue: revenueResult ? parseFloat(revenueResult.revenue) || 0 : 0,
     };
   }
+
+  async findOneOnlyOrder(id: number): Promise<Order | null> {
+  if (!id || isNaN(id)) {
+    throw new BadRequestException('ID invalide');
+  }
+
+  const order = await this.orderRepository.findOne({
+    where: { id },
+    select: ['id', 'status_id'], // optionnel : limiter les champs si nécessaire
+  });
+
+  return order;
+}
+
 }
