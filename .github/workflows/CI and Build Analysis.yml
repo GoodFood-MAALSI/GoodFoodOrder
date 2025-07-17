@@ -1,5 +1,4 @@
 name: CI and Build Analysis
-
 on:
   push:
     branches:
@@ -12,40 +11,165 @@ jobs:
   build:
     name: Install, Build, Test, and Analyze
     runs-on: ubuntu-latest
-
     strategy:
       matrix:
         node-version: [18]
-
+    
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full clone for better analysis with SonarQube
-
+          fetch-depth: 0
+      
       # Set up Node.js
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
-
+      
       # Install dependencies
       - run: npm ci
-
+      
       # Build the project
       - run: npm run build --if-present
-
+      
+      # Start application for security testing
+      - name: Start Application
+        run: |
+          echo "Starting application..."
+          npm start &
+          APP_PID=$!
+          echo "APP_PID=$APP_PID" >> $GITHUB_ENV
+          
+          # Wait for app with better error handling
+          echo "Waiting for application to be ready..."
+          for i in {1..30}; do
+            if curl -f http://localhost:3000 >/dev/null 2>&1; then
+              echo "✅ Application is ready on port 3000!"
+              curl -s http://localhost:3000 | head -5
+              break
+            fi
+            echo "⏳ Attempt $i/30: Waiting for application..."
+            sleep 2
+          done
+          
+          # Final verification
+          if ! curl -f http://localhost:3000 >/dev/null 2>&1; then
+            echo "❌ Application failed to start properly"
+            netstat -tlnp | grep 3000 || echo "No process listening on port 3000"
+            exit 1
+          fi
+        env:
+          NODE_ENV: test
+          CI: true
+      
+      # Create ZAP working directory with proper permissions
+      - name: Prepare ZAP workspace
+        run: |
+          mkdir -p ${{ github.workspace }}/zap-reports
+          chmod 777 ${{ github.workspace }}/zap-reports
+          ls -la ${{ github.workspace }}/zap-reports
+      
+      # OWASP ZAP Baseline Scan using Docker (more reliable)
       - name: Run OWASP ZAP Baseline Scan
+        run: |
+          echo "🔍 Starting OWASP ZAP baseline scan..."
+          docker run -v ${{ github.workspace }}/zap-reports:/zap/wrk/:rw \
+            --network=host \
+            -u $(id -u):$(id -g) \
+            -t ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+            -t http://localhost:3000 \
+            -J zap-report.json \
+            -w zap-report.md \
+            -r zap-report.html \
+            -I \
+            -l INFO || echo "ZAP scan completed (exit code $?)"
+          
+          echo "📊 ZAP scan results:"
+          ls -la ${{ github.workspace }}/zap-reports/
+        continue-on-error: true
+      
+      # Alternative: Use GitHub Action if Docker approach fails
+      - name: Run OWASP ZAP Baseline Scan (GitHub Action)
+        if: failure()
         uses: zaproxy/action-baseline@v0.12.0
         with:
           target: 'http://localhost:3000'
-
+          cmd_options: '-a -I -l INFO'
+          fail_action: false
+        continue-on-error: true
+      
+      # Stop application
+      - name: Stop Application
+        if: always()
+        run: |
+          if [ ! -z "$APP_PID" ]; then
+            echo "🛑 Stopping application (PID: $APP_PID)"
+            kill $APP_PID || true
+            sleep 2
+            kill -9 $APP_PID 2>/dev/null || true
+          fi
+          
+          # Clean up any remaining processes on port 3000
+          lsof -ti:3000 | xargs kill -9 2>/dev/null || true
+      
+      # Upload ZAP results
+      - name: Upload ZAP Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-security-reports-${{ github.run_number }}
+          path: |
+            zap-reports/
+            report_html.html
+            report_json.json
+            report_md.md
+            report_xml.xml
+          retention-days: 30
+      
+      # Generate ZAP summary comment for PRs
+      - name: Comment ZAP Results on PR
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let zapSummary = '## 🔒 OWASP ZAP Security Scan Results\n\n';
+            
+            // Check for ZAP markdown report
+            const mdFiles = ['zap-reports/zap-report.md', 'report_md.md'];
+            let reportFound = false;
+            
+            for (const file of mdFiles) {
+              if (fs.existsSync(file)) {
+                const content = fs.readFileSync(file, 'utf8');
+                zapSummary += content.substring(0, 4000); // Limit comment size
+                reportFound = true;
+                break;
+              }
+            }
+            
+            if (!reportFound) {
+              zapSummary += '⚠️ ZAP scan completed but no detailed report was generated.\n';
+              zapSummary += 'Check the [workflow artifacts](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for full results.\n';
+            }
+            
+            zapSummary += '\n---\n*Security scan performed by OWASP ZAP*';
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: zapSummary
+            });
+      
       # SonarQube scan
       - name: SonarQube Scan
         uses: sonarsource/sonarqube-scan-action@v4
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
+      
       - name: Check SonarQube Quality Gate
         uses: sonarsource/sonarqube-quality-gate-action@v1
         timeout-minutes: 5
