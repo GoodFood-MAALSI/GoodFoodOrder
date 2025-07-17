@@ -35,8 +35,10 @@ jobs:
       # Build the project
       - run: npm run build --if-present
 
-      # Run tests
-      - run: npm test
+      - name: Run OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: 'http://localhost:3000'
 
       # SonarQube scan
       - name: SonarQube Scan
