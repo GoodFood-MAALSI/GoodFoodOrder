@@ -8,7 +8,7 @@ import { OrderController } from './orders.controller';
 import { OrderService } from './orders.service';
 import { InterserviceService } from '../interservice/interservice.service';
 import { KafkaConsumerService } from '../kafka/kafka-consumer.service';
-import { ConfigModule } from 'node_modules/@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 
 @Module({
   imports: [
