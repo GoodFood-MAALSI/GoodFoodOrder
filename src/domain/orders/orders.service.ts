@@ -250,7 +250,7 @@ export class OrderService {
   > {
     const order = await this.orderRepository.findOne({
       where: { id },
-      relations: ['status'],
+      relations: ['status', 'orderItems'],
     });
     if (!order) {
       throw new NotFoundException(`Commande ${id} introuvable`);
