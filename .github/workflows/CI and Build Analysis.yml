@@ -32,65 +32,8 @@ jobs:
       
       # Build the project
       - run: npm run build --if-present
-      
-      # Start application for security testing
-      - name: Start Application
-        run: |
-          echo "Starting application..."
-          npm start &
-          APP_PID=$!
-          echo "APP_PID=$APP_PID" >> $GITHUB_ENV
-          
-          # Wait for app with better error handling
-          echo "Waiting for application to be ready..."
-          for i in {1..30}; do
-            if curl -f http://localhost:3000 >/dev/null 2>&1; then
-              echo "✅ Application is ready on port 3000!"
-              curl -s http://localhost:3000 | head -5
-              break
-            fi
-            echo "⏳ Attempt $i/30: Waiting for application..."
-            sleep 2
-          done
-          
-          # Final verification
-          if ! curl -f http://localhost:3000 >/dev/null 2>&1; then
-            echo "❌ Application failed to start properly"
-            netstat -tlnp | grep 3000 || echo "No process listening on port 3000"
-            exit 1
-          fi
-        env:
-          NODE_ENV: test
-          CI: true
-      
-      # Create ZAP working directory with proper permissions
-      - name: Prepare ZAP workspace
-        run: |
-          mkdir -p ${{ github.workspace }}/zap-reports
-          chmod 777 ${{ github.workspace }}/zap-reports
-          ls -la ${{ github.workspace }}/zap-reports
-      
-      # OWASP ZAP Baseline Scan using Docker (more reliable)
-      - name: Run OWASP ZAP Baseline Scan
-        run: |
-          echo "🔍 Starting OWASP ZAP baseline scan..."
-          docker run -v ${{ github.workspace }}/zap-reports:/zap/wrk/:rw \
-            --network=host \
-            -u $(id -u):$(id -g) \
-            -t ghcr.io/zaproxy/zaproxy:stable \
-            zap-baseline.py \
-            -t http://localhost:3000 \
-            -J zap-report.json \
-            -w zap-report.md \
-            -r zap-report.html \
-            -I \
-            -l INFO || echo "ZAP scan completed (exit code $?)"
-          
-          echo "📊 ZAP scan results:"
-          ls -la ${{ github.workspace }}/zap-reports/
-        continue-on-error: true
-      
-      # Alternative: Use GitHub Action if Docker approach fails
+
+      # OWASP Job
       - name: Run OWASP ZAP Baseline Scan (GitHub Action)
         if: failure()
         uses: zaproxy/action-baseline@v0.12.0
