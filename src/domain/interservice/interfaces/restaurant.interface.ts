@@ -1,4 +1,3 @@
-
 export interface Restaurant {
   id: number;
   name: string;
@@ -9,4 +8,14 @@ export interface Restaurant {
   country: string;
   email: string;
   phone_number: string;
+  long: number;
+  lat: number;
+  images?: Image[];
+}
+
+export interface Image {
+  id: number;
+  filename: string;
+  path: string;
+  isMain: boolean;
 }
