@@ -11,6 +11,8 @@ import { MenuItem } from 'src/domain/interservice/interfaces/menu-item.interface
 import { MenuItemDto } from 'src/domain/interservice/dto/menu-item.dto';
 import { MenuItemOptionValueDto } from 'src/domain/interservice/dto/menu-item-option-value.dto';
 import { MenuItemOptionValue } from 'src/domain/interservice/interfaces/menu-item-option-value.interface';
+import { DeliveryDto } from 'src/domain/interservice/dto/delivery.dto';
+import { Delivery } from 'src/domain/interservice/interfaces/delivery.interface';
 
 export class OrderItemResponseDto extends OrderItem {
   @ApiProperty({ type: () => MenuItemDto, required: false })
@@ -32,4 +34,7 @@ export class OrderResponseDto extends Order {
 
   @ApiProperty({ type: () => OrderItemResponseDto, isArray: true })
   orderItems?: OrderItemResponseDto[];
+
+  @ApiProperty({ type: () => DeliveryDto, required: false })
+  delivery?: Delivery;
 }

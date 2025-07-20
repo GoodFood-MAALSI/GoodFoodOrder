@@ -18,6 +18,7 @@ import { Deliverer } from '../interservice/interfaces/deliverer.interface';
 import { MenuItem } from '../interservice/interfaces/menu-item.interface';
 import { MenuItemOptionValue } from '../interservice/interfaces/menu-item-option-value.interface';
 import { InterserviceService } from '../interservice/interservice.service';
+import { Delivery } from '../interservice/interfaces/delivery.interface';
 
 @Injectable()
 export class OrderService {
@@ -42,6 +43,7 @@ export class OrderService {
         menu_item?: MenuItem;
         menu_item_option_values?: MenuItemOptionValue[];
       })[];
+      delivery?: Delivery;
     }
   > {
     const client = await this.interserviceService.fetchClient(order.client_id);
@@ -62,12 +64,15 @@ export class OrderService {
         )
       : undefined;
 
+    const delivery = await this.interserviceService.fetchDeliveryByOrderId(order.id);
+
     return {
       ...order,
       client,
       restaurant,
       deliverer,
       orderItems: enrichedOrderItems,
+      delivery,
     };
   }
 
@@ -246,6 +251,7 @@ export class OrderService {
         menu_item?: MenuItem;
         menu_item_option_values?: MenuItemOptionValue[];
       })[];
+      delivery?: Delivery;
     }
   > {
     const order = await this.orderRepository.findOne({
@@ -621,16 +627,16 @@ export class OrderService {
   }
 
   async findOneOnlyOrder(id: number): Promise<Order | null> {
-  if (!id || isNaN(id)) {
-    throw new BadRequestException('ID invalide');
-  }
+    if (!id || isNaN(id)) {
+      throw new BadRequestException('ID invalide');
+    }
 
-  const order = await this.orderRepository.findOne({
+    const order = await this.orderRepository.findOne({
     where: { id },
-    select: ['id', 'status_id'], // optionnel : limiter les champs si nécessaire
+    select: ['id', 'status_id'],
   });
 
-  return order;
-}
+    return order;
+  }
 
 }

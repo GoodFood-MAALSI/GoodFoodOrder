@@ -7,6 +7,7 @@ import { Restaurant } from './interfaces/restaurant.interface';
 import { Deliverer } from './interfaces/deliverer.interface';
 import { MenuItem } from './interfaces/menu-item.interface';
 import { MenuItemOptionValue } from './interfaces/menu-item-option-value.interface';
+import { Delivery } from './interfaces/delivery.interface';
 
 @Injectable()
 export class InterserviceService {
@@ -208,6 +209,34 @@ export class InterserviceService {
     } catch (error) {
       console.error(
         `Erreur lors de la récupération des menu item option values ${optionValueIds}:`,
+        error.message,
+      );
+      return null;
+    }
+  }
+
+  async fetchDeliveryByOrderId(orderId: number): Promise<Delivery | null> {
+    try {
+      const route = `deliveries/interservice/order/${orderId}`;
+      const token = this.generateJwtTokenForDelivery();
+      console.log(`Fetching delivery for order ${orderId} with token: ${token}`);
+      const response = await firstValueFrom(
+        this.httpService.get(`${this.deliveryServiceUrl}/${route}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      );
+      console.log(
+        `Delivery for order ${orderId} fetched successfully:`,
+        response.data,
+      );
+      return response.data || null;
+    } catch (error) {
+      console.error(
+        `Erreur lors de la récupération de la livraison pour la commande ${orderId}:`,
+        error.response?.status,
+        error.response?.data,
         error.message,
       );
       return null;
