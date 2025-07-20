@@ -48,6 +48,9 @@ export class RestaurantDto {
   @ApiProperty({ example: 16.0 })
   lat: number;
 
+  @ApiProperty({ example: 1 })
+  userId: number;
+
   @ApiProperty({ type: [ImageDto], required: false })
   images?: ImageDto[];
 }

@@ -35,14 +35,14 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
             try {
               const payload = JSON.parse(message.value.toString());
               const { orderId, delivererId } = payload;
-              if (!delivererId) {
-                this.logger.error(`Missing delivererId in delivery-created message for order ${orderId}`);
+              if (!orderId || !delivererId) {
+                this.logger.error(`Missing orderId or delivererId in delivery-created message: ${JSON.stringify(payload)}`);
                 return;
               }
               await this.orderService.acceptOrder(orderId, delivererId);
               this.logger.log(`Order ${orderId} status updated to 3 and deliverer ${delivererId} assigned`);
             } catch (error) {
-              this.logger.error(`Error processing delivery-created message:`, error);
+              this.logger.error(`Error processing delivery-created message: ${error.message}`);
             }
           }
         },

@@ -47,11 +47,6 @@ class OrderItemDto {
 }
 
 export class CreateOrderDto {
-  @ApiProperty({ example: 1, description: 'ID du client' })
-  @IsNotEmpty()
-  @IsInt()
-  client_id: number;
-
   @ApiProperty({ example: 1, description: 'ID du restaurant' })
   @IsNotEmpty()
   @IsInt()

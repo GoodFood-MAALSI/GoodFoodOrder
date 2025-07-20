@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull, MoreThanOrEqual } from 'typeorm';
 import { Order } from './entities/order.entity';
@@ -31,6 +37,92 @@ export class OrderService {
     private readonly orderStatusRepository: Repository<OrderStatus>,
     private readonly interserviceService: InterserviceService,
   ) {}
+
+  private async checkOrderAccess(
+    orderId: number,
+    user: { id: number; role: string },
+  ): Promise<Order> {
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId },
+      relations: ['status', 'orderItems'],
+    });
+    if (!order) {
+      throw new NotFoundException(`Commande ${orderId} introuvable`);
+    }
+
+    if (user.role === 'super-admin' || user.role === 'admin') {
+      return order;
+    }
+
+    if (user.role === 'client' && order.client_id !== user.id) {
+      throw new HttpException(
+        'Vous ne pouvez accéder qu’à vos propres commandes',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    if (user.role === 'deliverer' && order.deliverer_id !== user.id) {
+      throw new HttpException(
+        'Vous ne pouvez accéder qu’à vos propres commandes',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    if (user.role === 'restaurateur') {
+      try {
+        const restaurant = await this.interserviceService.fetchRestaurant(order.restaurant_id);
+        console.log('Restaurant fetched:', restaurant, 'User ID:', user.id);
+        if (!restaurant) {
+          throw new NotFoundException(`Restaurant ${order.restaurant_id} introuvable`);
+        }
+        if (restaurant.userId !== user.id) {
+          throw new HttpException(
+            'Vous ne pouvez accéder qu’aux commandes de vos propres restaurants',
+            HttpStatus.FORBIDDEN,
+          );
+        }
+      } catch (error) {
+        if (error instanceof HttpException) {
+          throw error;
+        }
+        console.error('Erreur technique lors de fetchRestaurant:', error.message);
+        throw new HttpException(
+          'Erreur technique lors de la vérification du restaurant',
+          HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+    }
+
+    return order;
+  }
+
+  private async checkRestaurantOwnership(
+    restaurantId: number,
+    userId: number,
+  ): Promise<void> {
+    try {
+      const restaurant = await this.interserviceService.fetchRestaurant(restaurantId);
+      console.log('Restaurant fetched for ownership check:', restaurant, 'User ID:', userId);
+      if (!restaurant) {
+        throw new NotFoundException(`Restaurant ${restaurantId} introuvable`);
+      }
+      if (restaurant.userId !== userId) {
+        throw new HttpException(
+          'Vous n’êtes pas autorisé à accéder à ce restaurant',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      console.error('Erreur technique lors de fetchRestaurant:', error.message);
+      throw new HttpException(
+        'Erreur technique lors de la vérification du restaurant',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 
   private async enrichOrder(
     order: Order,
@@ -94,7 +186,10 @@ export class OrderService {
     );
   }
 
-  async create(createOrderDto: CreateOrderDto): Promise<
+  async create(
+    createOrderDto: CreateOrderDto,
+    userId: number,
+  ): Promise<
     Order & {
       client?: Client;
       restaurant?: Restaurant;
@@ -106,9 +201,8 @@ export class OrderService {
     }
   > {
     const {
-      client_id,
       restaurant_id,
-      status_id,
+      status_id = 1,
       description,
       subtotal,
       delivery_costs,
@@ -141,7 +235,7 @@ export class OrderService {
 
     try {
       const order = this.orderRepository.create({
-        client_id,
+        client_id: userId,
         restaurant_id,
         status_id,
         description,
@@ -173,7 +267,7 @@ export class OrderService {
 
       savedOrder.orderItems = await this.orderItemRepository.save(orderItems);
 
-      return savedOrder;
+      return this.enrichOrder(savedOrder);
     } catch (error) {
       throw new BadRequestException(
         `Erreur lors de la sauvegarde de la commande: ${error.message}`,
@@ -181,9 +275,16 @@ export class OrderService {
     }
   }
 
-  async acceptOrder(orderId: number, delivererId: number): Promise<Order> {
+  async acceptOrder(orderId: number, delivererId: number, userId?: number): Promise<Order> {
+    if (userId !== undefined && delivererId !== userId) {
+      throw new HttpException(
+        'Vous ne pouvez accepter une commande qu’en tant que livreur assigné',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
     const order = await this.orderRepository.findOne({
-      where: { id: orderId }
+      where: { id: orderId },
     });
     if (!order) {
       throw new NotFoundException(`Commande ${orderId} introuvable`);
@@ -242,7 +343,10 @@ export class OrderService {
     return { orders: enrichedOrders, total };
   }
 
-  async findOne(id: number): Promise<
+  async findOne(
+    id: number,
+    user: { id: number; role: string },
+  ): Promise<
     Order & {
       client?: Client;
       restaurant?: Restaurant;
@@ -254,20 +358,15 @@ export class OrderService {
       delivery?: Delivery;
     }
   > {
-    const order = await this.orderRepository.findOne({
-      where: { id },
-      relations: ['status', 'orderItems'],
-    });
-    if (!order) {
-      throw new NotFoundException(`Commande ${id} introuvable`);
-    }
+    const order = await this.checkOrderAccess(id, user);
     return this.enrichOrder(order);
   }
 
   async findByClient(
     clientId: number,
-    page: number = 1,
-    limit: number = 10,
+    page: number,
+    limit: number,
+    user: { id: number; role: string },
   ): Promise<{
     orders: (Order & {
       client?: Client;
@@ -280,6 +379,13 @@ export class OrderService {
     })[];
     total: number;
   }> {
+    if (user.role !== 'client' || user.id !== clientId) {
+      throw new HttpException(
+        'Vous ne pouvez accéder qu’à vos propres commandes',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
     const [orders, total] = await this.orderRepository.findAndCount({
       where: { client_id: clientId },
       relations: ['status'],
@@ -294,7 +400,8 @@ export class OrderService {
 
   async findByRestaurant(
     restaurantId: number,
-    filters: FilterRestaurantOrdersDto = {},
+    filters: FilterRestaurantOrdersDto,
+    user: { id: number; role: string },
   ): Promise<{
     orders: (Order & {
       client?: Client;
@@ -307,6 +414,8 @@ export class OrderService {
     })[];
     total: number;
   }> {
+    await this.checkRestaurantOwnership(restaurantId, user.id);
+
     const { page = 1, limit = 10, status_id } = filters;
 
     const where: any = { restaurant_id: restaurantId };
@@ -377,6 +486,7 @@ export class OrderService {
   async findByDeliverer(
     delivererId: number,
     filters: FilterDelivererOrdersDto,
+    user: { id: number; role: string },
   ): Promise<{
     orders: (Order & {
       client?: Client;
@@ -389,6 +499,13 @@ export class OrderService {
     })[];
     total: number;
   }> {
+    if (user.role !== 'deliverer' || user.id !== delivererId) {
+      throw new HttpException(
+        'Vous ne pouvez accéder qu’à vos propres commandes',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
     const { page = 1, limit = 10, status_id } = filters;
 
     const where: any = { deliverer_id: delivererId };
@@ -411,23 +528,9 @@ export class OrderService {
   async updateStatus(
     id: number,
     updateOrderStatusDto: UpdateOrderStatusDto,
-  ): Promise<
-    Order & {
-      client?: Client;
-      restaurant?: Restaurant;
-      deliverer?: Deliverer;
-      orderItems?: (OrderItem & {
-        menu_item?: MenuItem;
-        menu_item_option_values?: MenuItemOptionValue[];
-      })[];
-    }
-  > {
-    const order = await this.orderRepository.findOne({
-      where: { id }
-    });
-    if (!order) {
-      throw new NotFoundException(`Commande ${id} introuvable`);
-    }
+    user: { id: number; role: string },
+  ): Promise<Order> {
+    const order = await this.checkOrderAccess(id, user);
 
     const status = await this.orderStatusRepository.findOne({
       where: { id: updateOrderStatusDto.status_id },
@@ -445,7 +548,12 @@ export class OrderService {
 
     const reloadedOrder = await this.orderRepository.findOne({
       where: { id },
+      relations: ['status'],
     });
+
+    if (!reloadedOrder) {
+      throw new NotFoundException(`Commande ${id} introuvable après mise à jour`);
+    }
 
     return reloadedOrder;
   }
@@ -453,23 +561,9 @@ export class OrderService {
   async updateStatusAndDeliverer(
     id: number,
     updateOrderStatusDto: { status_id: number; deliverer_id: number },
-  ): Promise<
-    Order & {
-      client?: Client;
-      restaurant?: Restaurant;
-      deliverer?: Deliverer;
-      orderItems?: (OrderItem & {
-        menu_item?: MenuItem;
-        menu_item_option_values?: MenuItemOptionValue[];
-      })[];
-    }
-  > {
-    const order = await this.orderRepository.findOne({
-      where: { id }
-    });
-    if (!order) {
-      throw new NotFoundException(`Commande ${id} introuvable`);
-    }
+    user: { id: number; role: string },
+  ): Promise<Order> {
+    const order = await this.checkOrderAccess(id, user);
 
     const status = await this.orderStatusRepository.findOne({
       where: { id: updateOrderStatusDto.status_id },
@@ -487,29 +581,19 @@ export class OrderService {
     await this.orderRepository.save(order);
 
     const reloadedOrder = await this.orderRepository.findOne({
-      where: { id }
+      where: { id },
+      relations: ['status'],
     });
+
+    if (!reloadedOrder) {
+      throw new NotFoundException(`Commande ${id} introuvable après mise à jour`);
+    }
 
     return reloadedOrder;
   }
 
-  async cancelOrder(id: number): Promise<
-    Order & {
-      client?: Client;
-      restaurant?: Restaurant;
-      deliverer?: Deliverer;
-      orderItems?: (OrderItem & {
-        menu_item?: MenuItem;
-        menu_item_option_values?: MenuItemOptionValue[];
-      })[];
-    }
-  > {
-    const order = await this.orderRepository.findOne({
-      where: { id }
-    });
-    if (!order) {
-      throw new NotFoundException(`Commande ${id} introuvable`);
-    }
+  async cancelOrder(id: number, user: { id: number; role: string }): Promise<Order> {
+    const order = await this.checkOrderAccess(id, user);
 
     if (order.status_id === 7) {
       throw new BadRequestException('La commande est déjà annulée');
@@ -528,8 +612,13 @@ export class OrderService {
     await this.orderRepository.save(order);
 
     const reloadedOrder = await this.orderRepository.findOne({
-      where: { id }
+      where: { id },
+      relations: ['status'],
     });
+
+    if (!reloadedOrder) {
+      throw new NotFoundException(`Commande ${id} introuvable après annulation`);
+    }
 
     return reloadedOrder;
   }
@@ -537,6 +626,7 @@ export class OrderService {
   async getRestaurantStats(
     restaurantId: number,
     filters: StatsOrderByRestaurantFilterDto,
+    user: { id: number; role: string },
   ): Promise<{
     order_count: number;
     menu_item_id: number | null;
@@ -544,6 +634,8 @@ export class OrderService {
     item_count: number | null;
     revenue: number;
   }> {
+    await this.checkRestaurantOwnership(restaurantId, user.id);
+
     const { period } = filters;
     const where: any = { restaurant_id: restaurantId };
 
@@ -632,11 +724,11 @@ export class OrderService {
     }
 
     const order = await this.orderRepository.findOne({
-    where: { id },
-    select: ['id', 'status_id'],
-  });
+      where: { id },
+      select: ['id', 'status_id'],
+    });
 
     return order;
   }
-
+  
 }

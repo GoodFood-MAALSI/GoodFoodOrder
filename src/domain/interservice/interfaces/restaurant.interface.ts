@@ -10,6 +10,7 @@ export interface Restaurant {
   phone_number: string;
   long: number;
   lat: number;
+  userId: number;
   images?: Image[];
 }
 
