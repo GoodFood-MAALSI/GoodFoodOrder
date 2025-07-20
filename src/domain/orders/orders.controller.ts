@@ -376,6 +376,7 @@ export class OrderController {
     return {
       id: order.id,
       status_id: order.status_id,
+      subtotal: order.subtotal,
     };
   }
 }

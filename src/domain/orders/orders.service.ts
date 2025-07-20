@@ -725,7 +725,7 @@ export class OrderService {
 
     const order = await this.orderRepository.findOne({
       where: { id },
-      select: ['id', 'status_id'],
+      select: ['id', 'status_id', 'subtotal'],
     });
 
     return order;
